@@ -38,6 +38,7 @@
 #include "target_specific.h"
 #include <memory>
 #include <utility>
+#include <vector>
 
 #ifdef ELECROW_ThinkNode_M5
 PCA9557 io(0x18, &Wire);
@@ -224,6 +225,8 @@ bool pmu_found;
 #if !MESHTASTIC_EXCLUDE_I2C
 // Array map of sensor types with i2c address and wire as we'll find in the i2c scan
 std::pair<uint8_t, TwoWire *> nodeTelemetrySensorsMap[_meshtastic_TelemetrySensorType_MAX + 1] = {};
+// Store all INA219 addresses found during scan (for multi-channel support)
+std::vector<std::pair<uint8_t, TwoWire *>> ina219Addresses;
 #endif
 
 Router *router = NULL; // Users of router don't care what sort of subclass implements that API
@@ -728,6 +731,16 @@ void setup()
     scannerToSensorsMap(i2cScanner, ScanI2C::DeviceType::INA260, meshtastic_TelemetrySensorType_INA260);
     scannerToSensorsMap(i2cScanner, ScanI2C::DeviceType::INA226, meshtastic_TelemetrySensorType_INA226);
     scannerToSensorsMap(i2cScanner, ScanI2C::DeviceType::INA219, meshtastic_TelemetrySensorType_INA219);
+    
+    // Collect all INA219 addresses for multi-channel support
+    auto ina219Addrs = i2cScanner->findAllINA219();
+    LOG_INFO("Scanner found %d INA219 device(s)", ina219Addrs.size());
+    ina219Addresses.clear();
+    for (const auto &addr : ina219Addrs) {
+        ina219Addresses.push_back(std::make_pair(addr.address, ScanI2CTwoWire::fetchI2CBus(addr)));
+        LOG_INFO("Found INA219 at address 0x%x on port %d", addr.address, addr.port);
+    }
+    
     scannerToSensorsMap(i2cScanner, ScanI2C::DeviceType::INA3221, meshtastic_TelemetrySensorType_INA3221);
     scannerToSensorsMap(i2cScanner, ScanI2C::DeviceType::MAX17048, meshtastic_TelemetrySensorType_MAX17048);
     scannerToSensorsMap(i2cScanner, ScanI2C::DeviceType::QMC6310, meshtastic_TelemetrySensorType_QMC6310);

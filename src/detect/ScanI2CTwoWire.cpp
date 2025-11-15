@@ -303,10 +303,10 @@ void ScanI2CTwoWire::scanPort(I2CPort port, uint8_t *address, uint8_t asize)
             case INA_ADDR_ALTERNATE:
             case INA_ADDR_WAVESHARE_UPS:
                 registerValue = getRegisterValue(ScanI2CTwoWire::RegisterLocation(addr, 0xFE), 2);
-                LOG_DEBUG("Register MFG_UID: 0x%x", registerValue);
+                LOG_DEBUG("Device at 0x%x: Register MFG_UID: 0x%x", (uint8_t)addr.address, registerValue);
                 if (registerValue == 0x5449) {
                     registerValue = getRegisterValue(ScanI2CTwoWire::RegisterLocation(addr, 0xFF), 2);
-                    LOG_DEBUG("Register DIE_UID: 0x%x", registerValue);
+                    LOG_DEBUG("Device at 0x%x: Register DIE_UID: 0x%x", (uint8_t)addr.address, registerValue);
 
                     if (registerValue == 0x2260) {
                         logFoundDevice("INA226", (uint8_t)addr.address);
@@ -613,6 +613,20 @@ void ScanI2CTwoWire::scanPort(I2CPort port, uint8_t *address, uint8_t asize)
 void ScanI2CTwoWire::scanPort(I2CPort port)
 {
     scanPort(port, nullptr, 0);
+}
+
+std::vector<ScanI2C::DeviceAddress> ScanI2CTwoWire::findAllINA219() const
+{
+    concurrency::LockGuard guard((concurrency::Lock *)&lock);
+    std::vector<ScanI2C::DeviceAddress> addresses;
+
+    for (const auto &pair : foundDevices) {
+        if (pair.second == ScanI2C::DeviceType::INA219) {
+            addresses.push_back(pair.first);
+        }
+    }
+
+    return addresses;
 }
 
 TwoWire *ScanI2CTwoWire::fetchI2CBus(ScanI2C::DeviceAddress address)

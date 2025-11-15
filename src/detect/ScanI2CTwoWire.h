@@ -7,6 +7,7 @@
 #include <memory>
 #include <stddef.h>
 #include <stdint.h>
+#include <vector>
 
 #include <Wire.h>
 
@@ -28,6 +29,9 @@ class ScanI2CTwoWire : public ScanI2C
     size_t countDevices() const override;
 
     static TwoWire *fetchI2CBus(ScanI2C::DeviceAddress);
+
+    // Get all INA219 addresses found during scan
+    std::vector<ScanI2C::DeviceAddress> findAllINA219() const;
 
   protected:
     FoundDevice firstOfOrNONE(size_t, DeviceType[]) const override;
