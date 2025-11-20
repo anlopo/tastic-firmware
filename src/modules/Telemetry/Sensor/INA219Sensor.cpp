@@ -121,7 +121,13 @@ bool INA219Sensor::getEnvironmentMetrics(meshtastic_Telemetry *measurement)
         return false;
     }
     
-    // Use first channel for environment metrics
+    // When multiple INA219 instances are present, use them only for power telemetry
+    // (multi-channel), not for environment telemetry (single-channel)
+    if (ina219Instances.size() > 1) {
+        return false;
+    }
+    
+    // Use first channel for environment metrics (single INA219 case)
     struct _INA219Measurement m = getMeasurement(0);
     
     measurement->variant.environment_metrics.has_voltage = true;
