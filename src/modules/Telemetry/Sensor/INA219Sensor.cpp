@@ -123,8 +123,9 @@ bool INA219Sensor::getEnvironmentMetrics(meshtastic_Telemetry *measurement)
     
     // When multiple INA219 instances are present, use them only for power telemetry
     // (multi-channel), not for environment telemetry (single-channel)
+    // Return true to allow other sensors to contribute their data
     if (ina219Instances.size() > 1) {
-        return false;
+        return true;
     }
     
     // Use first channel for environment metrics (single INA219 case)
