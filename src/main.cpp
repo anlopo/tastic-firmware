@@ -45,10 +45,6 @@
 #include "MessageStore.h"
 #endif
 
-#ifdef ELECROW_ThinkNode_M5
-PCA9557 io(0x18, &Wire);
-#endif
-
 #ifdef ARCH_ESP32
 #include "freertosinc.h"
 #if !MESHTASTIC_EXCLUDE_WEBSERVER
