@@ -9,6 +9,7 @@
 #include "FSCommon.h"
 #include "MeshRadio.h"
 #include "MeshService.h"
+#include "MessageStore.h"
 #include "NodeDB.h"
 #include "PacketHistory.h"
 #include "PowerFSM.h"
@@ -17,6 +18,7 @@
 #include "Router.h"
 #include "SPILock.h"
 #include "SafeFile.h"
+#include "TransmitHistory.h"
 #include "TypeConversions.h"
 #include "error.h"
 #include "main.h"
@@ -78,6 +80,14 @@ static unsigned char userprefs_admin_key_1[] = USERPREFS_USE_ADMIN_KEY_1;
 #ifdef USERPREFS_USE_ADMIN_KEY_2
 static unsigned char userprefs_admin_key_2[] = USERPREFS_USE_ADMIN_KEY_2;
 #endif
+
+// Weak empty variant initialization function.
+// May be redefined by variant files.
+void variantDefaultConfig() __attribute__((weak));
+void variantDefaultConfig() {}
+
+void variantDefaultModuleConfig() __attribute__((weak));
+void variantDefaultModuleConfig() {}
 
 #ifdef HELTEC_MESH_NODE_T114
 
@@ -322,9 +332,9 @@ NodeDB::NodeDB()
     // config.network.enabled_protocols = meshtastic_Config_NetworkConfig_ProtocolFlags_UDP_BROADCAST;
 
     // If we are setup to broadcast on any default channel slot (with default frequency slot semantics),
-    // ensure that the telemetry intervals are coerced to the minimum value of 30 minutes or more.
+    // ensure that the telemetry intervals are coerced to the role-aware minimum value.
     if (channels.hasDefaultChannel()) {
-        LOG_DEBUG("Coerce telemetry to min of 30 minutes on defaults");
+        LOG_DEBUG("Coerce telemetry to role-aware minimum on defaults");
         moduleConfig.telemetry.device_update_interval = Default::getConfiguredOrMinimumValue(
             moduleConfig.telemetry.device_update_interval, min_default_telemetry_interval_secs);
         moduleConfig.telemetry.environment_update_interval = Default::getConfiguredOrMinimumValue(
@@ -347,7 +357,7 @@ NodeDB::NodeDB()
         }
     }
     if (positionUsesDefaultChannel) {
-        LOG_DEBUG("Coerce position broadcasts to min of 1 hour and smart broadcast min of 5 minutes on defaults");
+        LOG_DEBUG("Coerce position broadcasts to role-aware minimum and smart broadcast min of 5 minutes on defaults");
         config.position.position_broadcast_secs =
             Default::getConfiguredOrMinimumValue(config.position.position_broadcast_secs, min_default_broadcast_interval_secs);
         config.position.broadcast_smart_minimum_interval_secs = Default::getConfiguredOrMinimumValue(
@@ -509,6 +519,15 @@ bool NodeDB::factoryReset(bool eraseBleBonds)
     }
 #endif
     spiLock->unlock();
+
+    // rmDir above nuked the .dat file, but TransmitHistory's in-memory
+    // cache auto-flushes every 5 min and would resurrect it.
+    if (transmitHistory) {
+        transmitHistory->clear();
+    }
+#if HAS_SCREEN
+    messageStore.clearAllMessages();
+#endif
     // second, install default state (this will deal with the duplicate mac address issue)
     installDefaultNodeDatabase();
     installDefaultDeviceState();
@@ -568,6 +587,11 @@ void NodeDB::installDefaultConfig(bool preserveKey = false)
         true; // FIXME: maybe false in the future, and setting region to enable it. (unset region forces it off)
     config.lora.override_duty_cycle = false;
     config.lora.config_ok_to_mqtt = false;
+#if HAS_LORA_FEM
+    config.lora.fem_lna_mode = meshtastic_Config_LoRaConfig_FEM_LNA_Mode_ENABLED;
+#else
+    config.lora.fem_lna_mode = meshtastic_Config_LoRaConfig_FEM_LNA_Mode_NOT_PRESENT;
+#endif
 
 #if HAS_TFT // For the devices that support MUI, default to that
     config.display.displaymode = meshtastic_Config_DisplayConfig_DisplayMode_COLOR;
@@ -667,7 +691,8 @@ void NodeDB::installDefaultConfig(bool preserveKey = false)
 #endif
     config.position.broadcast_smart_minimum_distance = 100;
     config.position.broadcast_smart_minimum_interval_secs = default_broadcast_smart_minimum_interval_secs;
-    if (config.device.role != meshtastic_Config_DeviceConfig_Role_ROUTER)
+    if (config.device.role != meshtastic_Config_DeviceConfig_Role_ROUTER &&
+        config.device.role != meshtastic_Config_DeviceConfig_Role_ROUTER_LATE)
         config.device.node_info_broadcast_secs = default_node_info_broadcast_secs;
     config.security.serial_enabled = true;
     config.security.admin_channel_enabled = false;
@@ -675,7 +700,7 @@ void NodeDB::installDefaultConfig(bool preserveKey = false)
     strncpy(config.network.ntp_server, "meshtastic.pool.ntp.org", 32);
 
 #if (defined(T_DECK) || defined(T_WATCH_S3) || defined(UNPHONE) || defined(PICOMPUTER_S3) || defined(SENSECAP_INDICATOR) ||      \
-     defined(ELECROW_PANEL) || defined(HELTEC_V4_TFT)) &&                                                                        \
+     defined(ELECROW_PANEL) || defined(HELTEC_V4_TFT) || defined(HELTEC_V4_R8_TFT)) &&                                           \
     HAS_TFT
     // switch BT off by default; use TFT programming mode or hotkey to enable
     config.bluetooth.enabled = false;
@@ -772,6 +797,8 @@ void NodeDB::installDefaultConfig(bool preserveKey = false)
 #endif
 
     initConfigIntervals();
+    variantDefaultConfig();
+    variantDefaultModuleConfig();
 }
 
 void NodeDB::initConfigIntervals()
@@ -813,7 +840,8 @@ void NodeDB::installDefaultModuleConfig()
     moduleConfig.has_store_forward = true;
     moduleConfig.has_telemetry = true;
     moduleConfig.has_external_notification = true;
-#if defined(PIN_BUZZER) || defined(PIN_VIBRATION) || defined(LED_NOTIFICATION)
+#if defined(PIN_BUZZER) || defined(PIN_VIBRATION) || defined(LED_NOTIFICATION) || defined(PCA_LED_NOTIFICATION) ||               \
+    defined(NEOPIXEL_STATUS_NOTIFICATION_PIN)
     moduleConfig.external_notification.enabled = true;
 #endif
 #if defined(PIN_BUZZER)
@@ -834,7 +862,7 @@ void NodeDB::installDefaultModuleConfig()
 #endif
 #if defined(PIN_VIBRATION)
     moduleConfig.external_notification.nag_timeout = 2;
-#elif defined(PIN_BUZZER) || defined(LED_NOTIFICATION)
+#elif defined(PIN_BUZZER) || defined(LED_NOTIFICATION) || defined(NEOPIXEL_STATUS_NOTIFICATION_PIN)
     moduleConfig.external_notification.nag_timeout = default_ringtone_nag_secs;
 #endif
 
@@ -1192,11 +1220,11 @@ void NodeDB::loadFromDisk()
     spiLock->unlock();
 #endif
 #ifdef FSCom
-#ifdef FACTORY_INSTALL
+#if defined(FACTORY_INSTALL) && !defined(ARCH_PORTDUINO)
     spiLock->lock();
     if (!FSCom.exists("/prefs/" xstr(BUILD_EPOCH))) {
         LOG_WARN("Factory Install Reset!");
-        FSCom.format();
+        rmDir("/prefs");
         FSCom.mkdir("/prefs");
         File f2 = FSCom.open("/prefs/" xstr(BUILD_EPOCH), FILE_O_WRITE);
         if (f2) {
@@ -1295,6 +1323,10 @@ void NodeDB::loadFromDisk()
     if (config.has_lora && config.lora.use_preset) {
         RadioInterface::bootstrapLoRaConfigFromPreset(config.lora);
     }
+
+#if defined(USERPREFS_LORA_TX_DISABLED) && USERPREFS_LORA_TX_DISABLED
+    config.lora.tx_enabled = false;
+#endif
 
     if (backupSecurity.private_key.size > 0) {
         LOG_DEBUG("Restoring backup of security config");
