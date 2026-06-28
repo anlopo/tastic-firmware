@@ -19,6 +19,10 @@ class INA219Sensor : public TelemetrySensor, VoltageSensor, CurrentSensor
     std::vector<Adafruit_INA219 *> ina219Instances;
     std::vector<uint8_t> ina219Addrs;
 
+    // Initialize a single INA219 at addr/wire; returns true on success.
+    // Safe to call repeatedly — already-initialized addresses are skipped.
+    bool initOne(uint8_t addr, TwoWire *wire);
+
     // Get measurement from a specific channel (0-based index)
     struct _INA219Measurement getMeasurement(size_t channel);
 
@@ -34,14 +38,15 @@ class INA219Sensor : public TelemetrySensor, VoltageSensor, CurrentSensor
     virtual uint16_t getBusVoltageMv() override;
     virtual int16_t getCurrentMa() override;
     bool hasSensor();
-    
+
     // Destructor to clean up allocated INA219 instances
-    ~INA219Sensor();
+    ~INA219Sensor() override;
 };
 
 struct _INA219Measurement {
     float voltage;
     float current;
+    bool valid;
 };
 
 #endif
